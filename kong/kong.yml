@@ -39,5 +39,5 @@ jwt_secrets:
     algorithm: RS256
     rsa_public_key: |
       -----BEGIN PUBLIC KEY-----
-      MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAonOA8AgNaOl0virNPb1+KPNNJJ35epDt/P+ZbsSBSflpp2KkbKXCabuMR/Q3zZyqz+sGA97d3b6wa/0i2H/WhqYnjzpXEpmIPoQi+H/7eVFs8EZET6HMspk4KAXxfC+KeEEOrL3uZZU7laoePFkWk9kZR1l3cI6jxb1v82fa6+w7nKgjHDKVYSoHXHJ5LQnOKvYBLYTt5+FUksGhOlCcOOfuz9C8O5sdHbVN40J+SwQqX9pydttUN3Er1n9n2KFcIo5cAUCSCQZA4ztFgKIgsTlYVcc2WTA9Jy5I6/qoQVUi6d9Wdv2ZJJhMEs4WWeDzJyAomotgZUrj7qSEla6yxwIDAQAB
+      Inserez votre clé rsa apres avoir ouvert http://localhost:8080/realms/ibam-realm sur le navigateur
       -----END PUBLIC KEY-----
