@@ -1,0 +1,43 @@
+_format_version: "3.0"
+
+services:
+  - name: suppliers-service
+    url: http://suppliers-api:3000
+    routes:
+      - name: suppliers-route
+        paths:
+          - /api/v1/suppliers
+        strip_path: true
+
+  - name: products-service
+    url: http://products-api:3000
+    routes:
+      - name: products-route
+        paths:
+          - /api/v1/products
+        strip_path: true
+
+plugins:
+  - name: jwt
+    config:
+      claims_to_verify:
+        - exp
+      key_claim_name: iss
+
+  - name: rate-limiting
+    config:
+      minute: 5
+      policy: local
+      fault_tolerant: true
+
+consumers:
+  - username: keycloak-issuer
+
+jwt_secrets:
+  - consumer: keycloak-issuer
+    key: "http://localhost:8080/realms/ibam-realm"
+    algorithm: RS256
+    rsa_public_key: |
+      -----BEGIN PUBLIC KEY-----
+      MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAonOA8AgNaOl0virNPb1+KPNNJJ35epDt/P+ZbsSBSflpp2KkbKXCabuMR/Q3zZyqz+sGA97d3b6wa/0i2H/WhqYnjzpXEpmIPoQi+H/7eVFs8EZET6HMspk4KAXxfC+KeEEOrL3uZZU7laoePFkWk9kZR1l3cI6jxb1v82fa6+w7nKgjHDKVYSoHXHJ5LQnOKvYBLYTt5+FUksGhOlCcOOfuz9C8O5sdHbVN40J+SwQqX9pydttUN3Er1n9n2KFcIo5cAUCSCQZA4ztFgKIgsTlYVcc2WTA9Jy5I6/qoQVUi6d9Wdv2ZJJhMEs4WWeDzJyAomotgZUrj7qSEla6yxwIDAQAB
+      -----END PUBLIC KEY-----

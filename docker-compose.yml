@@ -1,0 +1,41 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:22.0.1
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json
+    ports:
+      - "8080:8080"
+
+  kong:
+    image: kong:3.4
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    volumes:
+      - ./kong/kong.yml:/usr/local/kong/declarative/kong.yml
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    depends_on:
+      - keycloak
+      - suppliers-api
+      - products-api
+
+  suppliers-api:
+    build: ./suppliers-api
+    expose:
+      - "3000"
+
+  products-api:
+    build: ./products-api
+    expose:
+      - "3000"
