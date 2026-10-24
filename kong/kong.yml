@@ -1,0 +1,43 @@
+_format_version: "3.0"
+
+services:
+  - name: suppliers-service
+    url: http://suppliers-api:3000
+    routes:
+      - name: suppliers-route
+        paths:
+          - /api/v1/suppliers
+        strip_path: true
+
+  - name: products-service
+    url: http://products-api:3000
+    routes:
+      - name: products-route
+        paths:
+          - /api/v1/products
+        strip_path: true
+
+plugins:
+  - name: jwt
+    config:
+      claims_to_verify:
+        - exp
+      key_claim_name: iss
+
+  - name: rate-limiting
+    config:
+      minute: 5
+      policy: local
+      fault_tolerant: true
+
+consumers:
+  - username: keycloak-issuer
+
+jwt_secrets:
+  - consumer: keycloak-issuer
+    key: "http://localhost:8080/realms/ibam-realm"
+    algorithm: RS256
+    rsa_public_key: |
+      -----BEGIN PUBLIC KEY-----
+      Inserez votre clé rsa apres avoir ouvert http://localhost:8080/realms/ibam-realm sur le navigateur
+      -----END PUBLIC KEY-----

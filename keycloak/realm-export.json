@@ -1,0 +1,27 @@
+{
+  "realm": "ibam-realm",
+  "enabled": true,
+  "roles": {
+    "realm": [
+      { "name": "user" },
+      { "name": "admin" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "kong-client",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "user1",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "password123" }],
+      "realmRoles": ["user"]
+    }
+  ]
+}
