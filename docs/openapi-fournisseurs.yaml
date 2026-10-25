@@ -1,0 +1,224 @@
+openapi: 3.0.3
+info:
+  title: API Fournisseurs
+  version: 2.0.0
+  description: 'API exposée uniquement via Kong API Gateway. Toutes les routes exigent
+    un jeton Keycloak (Bearer JWT RS256). Rôle `user` : lecture ; rôle `admin` : lecture
+    et écriture. Quota : 10 requêtes/minute par client.'
+servers:
+- url: http://localhost:8000/api/v1/suppliers
+  description: Via Kong
+security:
+- bearerAuth: []
+paths:
+  /:
+    get:
+      summary: Lister (pagination et filtres)
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          minimum: 1
+          maximum: 100
+      - name: name
+        in: query
+        description: Filtre (contient, insensible à la casse)
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - actif
+          - inactif
+      responses:
+        '200':
+          description: Liste paginée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  total:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Supplier'
+        '401': &id001
+          $ref: '#/components/responses/Unauthorized'
+        '403': &id002
+          $ref: '#/components/responses/Forbidden'
+        '429': &id003
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      summary: Créer (rôle admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplierInput'
+            example:
+              name: Nouveau Fournisseur
+              email: contact@nouveau.example
+              phone: +226 25 00 00 00
+              status: actif
+      responses:
+        '201':
+          description: Créé
+          content: &id004
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Supplier'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401': *id001
+        '403': *id002
+        '429': *id003
+  /{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    get:
+      summary: Consulter
+      responses:
+        '200': &id005
+          description: OK
+          content: *id004
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401': *id001
+        '403': *id002
+        '429': *id003
+    put:
+      summary: Modifier (rôle admin, champs partiels acceptés)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplierInput'
+      responses:
+        '200': *id005
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401': *id001
+        '403': *id002
+        '429': *id003
+    delete:
+      summary: Supprimer (rôle admin)
+      responses:
+        '204':
+          description: Supprimé
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401': *id001
+        '403': *id002
+        '429': *id003
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Jeton obtenu sur http://localhost:8080/realms/ibam-realm/protocol/openid-connect/token
+  schemas:
+    Supplier:
+      type: object
+      properties:
+        id:
+          type: integer
+        name: &id006
+          type: string
+          example: KBMSI SARL
+        email: &id007
+          type: string
+          format: email
+          example: info@kbmsi.example
+        phone: &id008
+          type: string
+          example: +226 25 30 00 02
+        status: &id009
+          type: string
+          enum:
+          - actif
+          - inactif
+          default: actif
+        created_at:
+          type: string
+          format: date-time
+    SupplierInput:
+      type: object
+      required:
+      - name
+      - email
+      properties:
+        name: *id006
+        email: *id007
+        phone: *id008
+        status: *id009
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
+  responses:
+    BadRequest:
+      description: Données ou identifiant invalides
+      content: &id010
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Ressource inexistante
+      content: *id010
+    Conflict:
+      description: Email déjà utilisé
+      content: *id010
+    Unauthorized:
+      description: 'Kong : jeton absent, invalide ou expiré'
+      content: *id010
+    Forbidden:
+      description: Kong (client non autorisé sur cette API) ou API (rôle insuffisant)
+      content: *id010
+    TooManyRequests:
+      description: 'Kong : quota du client dépassé'
+      content: *id010
