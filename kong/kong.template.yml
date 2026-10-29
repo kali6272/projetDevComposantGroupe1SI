@@ -1,0 +1,81 @@
+# Modèle de configuration déclarative Kong (DB-less).
+# Ne pas modifier kong.yml à la main : le conteneur kong-init génère
+# /kong-config/kong.yml à partir de ce fichier en remplaçant
+# __RSA_PUBLIC_KEY__ par la clé publique actuelle du realm Keycloak.
+_format_version: "3.0"
+
+services:
+  - name: suppliers-service
+    url: http://suppliers-api:3000
+    routes:
+      - name: suppliers-route
+        paths:
+          - /api/v1/suppliers
+        strip_path: true
+    plugins:
+      # Seuls les clients du groupe "fournisseurs" peuvent appeler cette API (sinon 403)
+      - name: acl
+        config:
+          allow:
+            - fournisseurs
+          hide_groups_header: true
+
+  - name: products-service
+    url: http://products-api:3000
+    routes:
+      - name: products-route
+        paths:
+          - /api/v1/products
+        strip_path: true
+    plugins:
+      - name: acl
+        config:
+          allow:
+            - produits
+          hide_groups_header: true
+
+plugins:
+  # Authentification : jetons RS256 émis par Keycloak.
+  # Le claim "azp" (client Keycloak) désigne le consumer Kong, ce qui permet
+  # d'identifier chaque client (ACL et quotas par client).
+  - name: jwt
+    config:
+      key_claim_name: azp
+      claims_to_verify:
+        - exp
+
+  # Limitation du nombre de requêtes PAR CLIENT (consumer Kong)
+  - name: rate-limiting
+    config:
+      minute: 10
+      limit_by: consumer
+      policy: local
+      fault_tolerant: true
+
+  # Identifiant de corrélation ajouté à chaque requête et réponse
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      generator: uuid
+      echo_downstream: true
+
+# Un consumer Kong par client Keycloak
+consumers:
+  - username: app-produits
+  - username: app-fournisseurs
+
+acls:
+  - consumer: app-produits
+    group: produits
+  - consumer: app-fournisseurs
+    group: fournisseurs
+
+jwt_secrets:
+  - consumer: app-produits
+    key: app-produits
+    algorithm: RS256
+    rsa_public_key: __RSA_PUBLIC_KEY__
+  - consumer: app-fournisseurs
+    key: app-fournisseurs
+    algorithm: RS256
+    rsa_public_key: __RSA_PUBLIC_KEY__

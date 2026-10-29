@@ -1,6 +1,6 @@
-# Sécurisation de microservices REST avec Kong Gateway et Keycloak
+# Sécurisation de plusieurs API REST avec Kong API Gateway et Keycloak
 
-> **Exercice 21** : architecture de microservices conteneurisée, protégée par une passerelle API et authentifiée par des jetons JWT.
+> **Exercice 21 - Groupe 1 SI** : deux API REST indépendantes (fournisseurs, produits), exposées par Kong et protégées par des jetons JWT émis par Keycloak, avec contrôle des rôles, restriction par client et limitation du nombre de requêtes.
 
 ## Sommaire
 
@@ -8,62 +8,51 @@
 2. [Architecture](#2-architecture)
 3. [Technologies utilisées](#3-technologies-utilisées)
 4. [Structure du dépôt](#4-structure-du-dépôt)
-5. [Lancement rapide](#5-lancement-rapide)
-6. [Configuration de la clé RSA](#6-configuration-de-la-clé-rsa)
-7. [Sécurité et fonctionnalités](#7-sécurité-et-fonctionnalités)
-8. [Scénarios de test](#8-scénarios-de-test)
-9. [Dépannage](#9-dépannage)
+5. [Installation sur une machine neuve](#5-installation-sur-une-machine-neuve)
+6. [Comptes et clients Keycloak](#6-comptes-et-clients-keycloak)
+7. [Sécurité mise en place](#7-sécurité-mise-en-place)
+8. [Les API](#8-les-api)
+9. [Tests](#9-tests)
+10. [Dépannage](#10-dépannage)
 
 ---
 
 ## 1. Présentation
 
-Ce projet met en œuvre une architecture de microservices conteneurisée et sécurisée :
-
-- deux **API REST** développées avec **Node.js / Express** ;
-- une passerelle **Kong API Gateway** en mode DB-less, point d'entrée unique ;
-- des jetons **JWT (RS256)** émis par **Keycloak** et validés par Kong.
+| Exigence de l'exercice 21 | Réalisation |
+|---------------------------|-------------|
+| 1. Deux API REST indépendantes | `suppliers-api` et `products-api` (Node.js/Express), chacune avec sa propre base PostgreSQL et un CRUD complet |
+| 2. Kong expose les routes publiques | `/api/v1/suppliers` et `/api/v1/products` sur le port 8000 ; les API ne sont pas accessibles directement |
+| 3. Keycloak : utilisateurs, rôles, clients | Realm `ibam-realm` importé au démarrage : 3 utilisateurs, 2 rôles, 2 clients |
+| 4. Politique d'authentification compatible avec Kong | Plugin `jwt` de Kong OSS 3.4 (RS256), clé publique Keycloak injectée automatiquement |
+| 5. Limitation par client + 401, 403, 429 | Plugin `rate-limiting` par consumer (1 consumer Kong = 1 client Keycloak), plugin `acl`, contrôle des rôles dans les API |
+| 6. Scénarios de test | Script automatisé : accès autorisé, jeton absent, jeton invalide, rôle insuffisant, client non autorisé, dépassement de quota |
 
 ---
 
 ## 2. Architecture
 
-L'infrastructure repose sur **4 conteneurs** orchestrés via Docker Compose.
-
-```text
-                        +-------------------+
-                        |   Client (cURL)   |
-                        +---------+---------+
-                                  |
-                                  v
-                        +-------------------+
-                        |   Kong Gateway    |
-                        |   (Port 8000)     |
-                        +----+---------+----+
-                             |         |
-              +--------------+         +--------------+
-              | (Validation JWT / RS256)              |
-              v                                       v
-    +-------------------+                   +-------------------+
-    |   Products API    |                   |   Suppliers API   |
-    |   (Port 3000)     |                   |   (Port 3000)     |
-    +-------------------+                   +-------------------+
-              ^                                       ^
-              |                                       |
-              +-----------------+---------------------+
-                                |
-                      +---------+---------+
-                      |     Keycloak      |
-                      |   (Port 8080)     |
-                      +-------------------+
+```mermaid
+flowchart LR
+    C[Client<br/>curl / Postman / tests] -->|1. identifiants| KC[Keycloak :8080<br/>realm ibam-realm]
+    KC -->|2. jeton JWT RS256| C
+    C -->|3. requête + Bearer| K[Kong :8000<br/>jwt → acl → rate-limiting]
+    INIT[kong-init<br/>génère kong.yml] -->|clé publique du realm| KC
+    INIT -->|kong.yml| K
+    K -->|/api/v1/suppliers| S[suppliers-api :3000<br/>contrôle des rôles]
+    K -->|/api/v1/products| P[products-api :3000<br/>contrôle des rôles]
+    S --> SDB[(suppliers-db<br/>PostgreSQL)]
+    P --> PDB[(products-db<br/>PostgreSQL)]
 ```
 
-| Conteneur | Rôle | Port |
-|-----------|------|------|
-| `kong` | Passerelle API (routage, validation JWT, rate limiting) | 8000 |
-| `keycloak` | Fournisseur d'identité (émission des jetons) | 8080 |
-| `products-api` | Service REST Produits | 3000 |
-| `suppliers-api` | Service REST Fournisseurs | 3000 |
+| Conteneur | Rôle | Port exposé |
+|-----------|------|-------------|
+| `keycloak` | Fournisseur d'identité : émet les jetons | 8080 |
+| `kong-init` | Récupère la clé publique du realm et génère `kong.yml`, puis s'arrête | — |
+| `kong` | Passerelle : routage, validation JWT, ACL, quotas | 8000 (admin : 127.0.0.1:8001) |
+| `suppliers-api` / `products-api` | API REST (CRUD, pagination, filtres, rôles) | interne uniquement |
+| `suppliers-db` / `products-db` | Bases PostgreSQL initialisées par `db/init.sql` | interne uniquement |
+| `tests` | Tests de bout en bout (profil `test`, lancé à la demande) | — |
 
 ---
 
@@ -71,224 +60,188 @@ L'infrastructure repose sur **4 conteneurs** orchestrés via Docker Compose.
 
 | Rôle | Technologie |
 |------|-------------|
-| API Gateway | Kong 3.4 (mode déclaratif / DB-less) |
-| Gestionnaire d'identité (IdP) | Keycloak 22.0.1 (Realm auto-importé) |
-| Backend des microservices | Node.js 18 (Alpine), Express.js |
+| API Gateway | Kong 3.4 OSS (mode déclaratif / DB-less) |
+| Gestionnaire d'identité | Keycloak 22.0.1 (realm auto-importé) |
+| API | Node.js 18, Express 4, `pg` |
+| Bases de données | PostgreSQL 16 |
 | Orchestration | Docker et Docker Compose |
+| Contrats d'API | OpenAPI 3.0 (`docs/`) |
 
 ---
 
 ## 4. Structure du dépôt
 
 ```text
-ProjetDevComposant/
-├── docker-compose.yml          # Orchestration des 4 services
-├── README.md                   # Documentation du projet
+projetDevComposantGroupe1SI/
+├── docker-compose.yml
+├── .env.example               # Variables (mots de passe) à copier en .env
+├── README.md
+├── docs/
+│   ├── openapi-produits.yaml
+│   └── openapi-fournisseurs.yaml
 ├── keycloak/
-│   └── realm-export.json       # Export du Realm « ibam-realm »
+│   └── realm-export.json      # Realm, rôles, clients, utilisateurs
 ├── kong/
-│   └── kong.yml                # Configuration déclarative (routes, plugins, JWT, consumer)
+│   ├── kong.template.yml      # Configuration Kong (routes, plugins, consumers)
+│   └── init/
+│       └── generate-kong-config.js   # Injecte la clé publique Keycloak
 ├── products-api/
-│   ├── app.js                  # Service REST Produits
-│   ├── package.json
-│   └── Dockerfile
-└── suppliers-api/
-    ├── app.js                  # Service REST Fournisseurs
-    ├── package.json
-    └── Dockerfile
+│   ├── app.js  auth.js  package.json  Dockerfile
+│   └── db/init.sql            # Table products + 10 produits
+├── suppliers-api/
+│   ├── app.js  auth.js  package.json  Dockerfile
+│   └── db/init.sql            # Table suppliers + 10 fournisseurs
+└── tests/
+    ├── run-tests.js           # Tests de bout en bout
+    └── RESULTATS_ATTENDUS.md
 ```
 
 ---
 
-## 5. Lancement rapide
+## 5. Installation sur une machine neuve
 
 ### Prérequis
 
-- **Docker Desktop** installé et démarré sur la machine hôte.
+- Docker Desktop (ou Docker Engine) avec Docker Compose v2, démarré ;
+- ports **8000**, **8001** et **8080** libres ;
+- Git.
 
-### Étape 1 : démarrer les conteneurs
-
-À la racine du projet, construire les images et démarrer les services :
-
-```bash
-docker compose up --build -d
-```
-
-### Étape 2 : vérifier l'état des services
-
-Tous les conteneurs doivent être à l'état `Up` :
+### Étapes
 
 ```bash
+git clone https://github.com/kali6272/projetDevComposantGroupe1SI.git
+cd projetDevComposantGroupe1SI
+cp .env.example .env          # PowerShell : Copy-Item .env.example .env
+docker compose up -d --build
 docker compose ps
 ```
 
-### Étape 3 : configurer la clé RSA
+Au premier lancement, Keycloak met 30 à 60 secondes à démarrer. `kong-init` attend qu'il soit prêt, puis Kong démarre. Quand `docker compose ps` montre `kong` à l'état `Up` (et `kong-init` à l'état `Exited (0)`), le projet est prêt.
 
-Voir la section suivante. Cette étape est **indispensable** sur une nouvelle machine.
+**Plus aucune clé RSA à copier à la main** : à chaque `docker compose up`, `kong-init` relit la clé publique actuelle du realm et régénère la configuration de Kong.
 
----
-
-## 6. Configuration de la clé RSA
-
-> ⚠️ **Important pour les collaborateurs.**
-> Si vous clonez ce projet sur une nouvelle machine, Keycloak peut générer une nouvelle paire de clés RSA. La clé publique configurée dans Kong doit correspondre à celle utilisée par Keycloak, sinon tous les jetons seront rejetés.
-
-### 6.1 Récupérer la clé publique
-
-Deux possibilités :
-
-- ouvrir `http://localhost:8080/realms/ibam-realm` dans le navigateur ;
-- ou passer par la console d'administration : **Realm Settings > Keys**.
-
-### 6.2 Insérer la clé dans `kong/kong.yml`
-
-Remplacer le bloc `rsa_public_key` par votre clé publique :
-
-```yaml
-_format_version: "3.0"
-
-services:
-  - name: suppliers-service
-    url: http://suppliers-api:3000
-    routes:
-      - name: suppliers-route
-        paths:
-          - /api/v1/suppliers
-        strip_path: true
-
-  - name: products-service
-    url: http://products-api:3000
-    routes:
-      - name: products-route
-        paths:
-          - /api/v1/products
-        strip_path: true
-
-plugins:
-  - name: jwt
-    config:
-      claims_to_verify:
-        - exp
-      key_claim_name: iss
-
-  - name: rate-limiting
-    config:
-      minute: 5
-      policy: local
-      fault_tolerant: true
-
-consumers:
-  - username: keycloak-issuer
-
-jwt_secrets:
-  - consumer: keycloak-issuer
-    key: "http://localhost:8080/realms/ibam-realm"
-    algorithm: RS256
-    rsa_public_key: |
-      -----BEGIN PUBLIC KEY-----
-      Insérez votre clé RSA récupérée depuis Keycloak ici
-      -----END PUBLIC KEY-----
-```
-
-### 6.3 Redémarrer Kong
+### Arrêt
 
 ```bash
-docker compose restart kong
+docker compose down        # arrête les conteneurs
+docker compose down -v     # arrête et supprime aussi les bases (réinitialisation complète)
 ```
 
 ---
 
-## 7. Sécurité et fonctionnalités
+## 6. Comptes et clients Keycloak
 
-### Routage
+Console d'administration : http://localhost:8080 (admin / admin).
 
-| Route exposée par Kong | Service cible |
-|------------------------|---------------|
-| `/api/v1/products` | `products-api:3000` |
-| `/api/v1/suppliers` | `suppliers-api:3000` |
+| Utilisateur | Mot de passe | Rôles | Droits |
+|-------------|--------------|-------|--------|
+| `admin1` | `admin123` | admin, user | Lecture et écriture |
+| `user1` | `password123` | user | Lecture seule |
+| `sansrole1` | `test123` | aucun | Aucun accès (403) |
 
-### Authentification JWT (Keycloak)
-
-Kong intercepte chaque requête et vérifie la **signature cryptographique RS256** du jeton d'accès à l'aide de la clé publique de Keycloak. La date d'expiration (`exp`) est également contrôlée.
-
-### Limitation de débit (Rate Limiting)
-
-- **5 requêtes par minute** au maximum ;
-- politique `local` ;
-- mode `fault_tolerant` activé.
+| Client Keycloak | Consumer Kong | API autorisée |
+|-----------------|---------------|---------------|
+| `app-produits` | `app-produits` | `/api/v1/products` |
+| `app-fournisseurs` | `app-fournisseurs` | `/api/v1/suppliers` |
 
 ---
 
-## 8. Scénarios de test
+## 7. Sécurité mise en place
 
-Les commandes sont écrites pour **PowerShell** (`curl.exe`).
+Ordre d'exécution des plugins dans Kong : **jwt → acl → rate-limiting**, puis l'API.
 
-### Résumé
+| Contrôle | Où | Résultat en cas de refus |
+|----------|----|--------------------------|
+| Signature RS256 et expiration (`exp`) du jeton | Kong, plugin `jwt` | **401** |
+| Le client Keycloak (claim `azp`) a-t-il accès à cette API ? | Kong, plugin `acl` | **403** |
+| Quota de **10 requêtes par minute et par client** | Kong, plugin `rate-limiting` (`limit_by: consumer`) | **429** |
+| Rôle de l'utilisateur (`realm_access.roles`) : `user` = GET, `admin` = GET/POST/PUT/DELETE | API (`auth.js`) | **403** |
 
-| Cas | Scénario | Résultat attendu |
-|-----|----------|------------------|
-| 1 | Jeton valide | `200 OK` |
-| 2 | Jeton absent | `401 Unauthorized` |
-| 3 | Jeton invalide | `401 Unauthorized` |
-| 4 | Plus de 5 requêtes en 60 s | `429 Too Many Requests` |
+**Pourquoi le plugin `jwt` ?** Le plugin `openid-connect` de Kong est réservé à la version Enterprise. Avec Kong OSS, la politique compatible consiste à valider les jetons RS256 de Keycloak avec le plugin `jwt`. Elle utilise la clé publique du realm, et `key_claim_name: azp` identifie chaque client Keycloak comme un consumer Kong distinct. C'est ce qui rend possibles les ACL et les quotas **par client**.
 
-### Étape A : obtenir un jeton d'accès
-
-```powershell
-curl.exe -X POST "http://localhost:8080/realms/ibam-realm/protocol/openid-connect/token" `
-  -H "Content-Type: application/x-www-form-urlencoded" `
-  -d "username=user1" `
-  -d "password=password123" `
-  -d "grant_type=password" `
-  -d "client_id=kong-client"
-```
-
-> **Remarque :** copiez la valeur du champ `access_token` de la réponse JSON, puis remplacez `VOTRE_ACCESS_TOKEN` dans les commandes ci-dessous.
-
-### Cas 1 : accès autorisé (HTTP 200 OK)
-
-**Service Produits**
-
-```powershell
-curl.exe -i -H "Authorization: Bearer VOTRE_ACCESS_TOKEN" http://localhost:8000/api/v1/products
-```
-
-**Service Fournisseurs**
-
-```powershell
-curl.exe -i -H "Authorization: Bearer VOTRE_ACCESS_TOKEN" http://localhost:8000/api/v1/suppliers
-```
-
-### Cas 2 : jeton absent (HTTP 401 Unauthorized)
-
-```powershell
-curl.exe -i http://localhost:8000/api/v1/products
-```
-
-**Résultat attendu :** Kong rejette la requête avec le statut `401 Unauthorized`.
-
-### Cas 3 : jeton invalide (HTTP 401 Unauthorized)
-
-```powershell
-curl.exe -i -H "Authorization: Bearer faux_token_123" http://localhost:8000/api/v1/products
-```
-
-**Résultat attendu :** Kong rejette la requête, car le jeton est invalide ou sa signature ne peut pas être vérifiée.
-
-### Cas 4 : dépassement du quota (HTTP 429 Too Many Requests)
-
-Exécuter la commande du cas 1 **plus de 5 fois en moins de 60 secondes**.
-
-**Résultat attendu :** une fois la limite atteinte, Kong bloque les requêtes suivantes avec le statut `429 Too Many Requests`.
-
-> **Remarque :** le comportement exact dépend de la configuration du plugin et de la façon dont le client est identifié.
+Un plugin `correlation-id` ajoute aussi un en-tête `X-Correlation-ID` à chaque requête et réponse.
 
 ---
 
-## 9. Dépannage
+## 8. Les API
+
+Contrats complets : [`docs/openapi-produits.yaml`](docs/openapi-produits.yaml) et [`docs/openapi-fournisseurs.yaml`](docs/openapi-fournisseurs.yaml) (à ouvrir dans https://editor.swagger.io).
+
+| Méthode | Route (via Kong) | Rôle requis | Codes |
+|---------|------------------|-------------|-------|
+| GET | `/api/v1/products?page=1&limit=10&name=...` | user ou admin | 200 |
+| GET | `/api/v1/products/{id}` | user ou admin | 200, 400, 404 |
+| POST | `/api/v1/products` | admin | 201, 400 |
+| PUT | `/api/v1/products/{id}` | admin | 200, 400, 404 |
+| DELETE | `/api/v1/products/{id}` | admin | 204, 404 |
+| GET | `/api/v1/suppliers?page=1&limit=10&name=...&status=actif` | user ou admin | 200 |
+| GET | `/api/v1/suppliers/{id}` | user ou admin | 200, 400, 404 |
+| POST | `/api/v1/suppliers` | admin | 201, 400, 409 (email déjà utilisé) |
+| PUT | `/api/v1/suppliers/{id}` | admin | 200, 400, 404, 409 |
+| DELETE | `/api/v1/suppliers/{id}` | admin | 204, 404 |
+
+Toutes les routes peuvent aussi renvoyer 401, 403 et 429 (voir section 7).
+
+---
+
+## 9. Tests
+
+### 9.1 Tests automatiques (recommandé)
+
+```bash
+docker compose --profile test run --rm tests
+```
+
+Le script attend le début d'une minute (pour partir de quotas remis à zéro), puis exécute 19 tests. Il se termine par un tableau récapitulatif et `Tous les tests sont réussis (19/19).` Le détail des scénarios et des codes attendus est dans [`tests/RESULTATS_ATTENDUS.md`](tests/RESULTATS_ATTENDUS.md).
+
+| Scénario exigé | Tests | Code |
+|----------------|-------|------|
+| Accès autorisé + bout en bout | A1 à A7, F1, F2 | 200, 201, 204 |
+| Jeton absent | J1 | 401 |
+| Jeton invalide | J2, J3, J4 | 401 |
+| Rôle insuffisant | R1, R2, F3 | 403 |
+| Client non autorisé sur l'API | C1 | 403 |
+| Dépassement de quota (par client) | Q1, Q2 | 429 puis 200 pour l'autre client |
+
+### 9.2 Tests manuels (PowerShell)
+
+**Obtenir un jeton** (admin1, client app-produits) :
+
+```powershell
+$TOKEN = (Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8080/realms/ibam-realm/protocol/openid-connect/token" `
+  -Body @{ grant_type="password"; client_id="app-produits"; username="admin1"; password="admin123" }).access_token
+```
+
+Avec curl (Git Bash, Linux, macOS) :
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8080/realms/ibam-realm/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=app-produits -d username=admin1 -d password=admin123 \
+  | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
+```
+
+| Cas | Commande (PowerShell, `curl.exe`) | Attendu |
+|-----|-----------------------------------|---------|
+| Accès autorisé | `curl.exe -i -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/products` | 200 |
+| Création | `curl.exe -i -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{\"name\":\"Ballon\",\"price\":12000}' http://localhost:8000/api/v1/products` | 201 |
+| Jeton absent | `curl.exe -i http://localhost:8000/api/v1/products` | 401 |
+| Jeton invalide | `curl.exe -i -H "Authorization: Bearer faux_token_123" http://localhost:8000/api/v1/products` | 401 |
+| Client non autorisé | `curl.exe -i -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/suppliers` | 403 |
+| Rôle insuffisant | Refaire « Obtenir un jeton » avec `user1` / `password123`, puis la commande « Création » | 403 |
+| Quota dépassé | `1..12 \| % { curl.exe -s -o NUL -w "%{http_code}\`n" -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/products }` | 200 ×10 puis 429 |
+
+Les en-têtes `X-RateLimit-Remaining-Minute` des réponses montrent le nombre de requêtes restantes. Le jeton expire après 5 minutes : en cas de 401 inattendu, redemandez-en un.
+
+---
+
+## 10. Dépannage
 
 | Symptôme | Cause probable | Solution |
 |----------|----------------|----------|
-| `401` alors que le jeton est valide | Clé publique de Kong différente de celle de Keycloak | Reprendre la [section 6](#6-configuration-de-la-clé-rsa), puis `docker compose restart kong` |
-| Impossible d'obtenir un jeton | Keycloak pas encore démarré | Attendre, puis vérifier avec `docker compose ps` |
-| `429` trop tôt | Limite de 5 requêtes par minute atteinte | Patienter 60 secondes |
+| `kong` ne démarre pas, `kong-init` en `Exited (1)` | Keycloak trop lent à démarrer | `docker compose up -d` (relance `kong-init` puis Kong) |
+| 401 avec un jeton valide | Jeton expiré (5 min) ou Keycloak recréé sans relancer `kong-init` | Redemander un jeton ; `docker compose up -d --force-recreate kong-init kong` |
+| 403 `You cannot consume this service` | Jeton demandé avec le mauvais client | Utiliser `app-produits` pour les produits, `app-fournisseurs` pour les fournisseurs |
+| 429 trop tôt | Quota de 10 requêtes/minute atteint | Attendre la minute suivante |
+| Port déjà utilisé | Un autre service occupe 8000, 8001 ou 8080 | Libérer le port ou modifier `ports` dans `docker-compose.yml` |
+| Données modifiées à réinitialiser | Les bases sont conservées dans des volumes | `docker compose down -v` puis `docker compose up -d --build` |

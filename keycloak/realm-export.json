@@ -1,27 +1,61 @@
 {
   "realm": "ibam-realm",
   "enabled": true,
+  "accessTokenLifespan": 300,
   "roles": {
     "realm": [
-      { "name": "user" },
-      { "name": "admin" }
+      { "name": "user", "description": "Lecture seule (GET)" },
+      { "name": "admin", "description": "Lecture et écriture (GET, POST, PUT, DELETE)" }
     ]
   },
   "clients": [
     {
-      "clientId": "kong-client",
+      "clientId": "app-produits",
+      "name": "Application consommatrice de l'API Produits",
       "enabled": true,
       "publicClient": true,
       "directAccessGrantsEnabled": true,
-      "standardFlowEnabled": true
+      "standardFlowEnabled": false
+    },
+    {
+      "clientId": "app-fournisseurs",
+      "name": "Application consommatrice de l'API Fournisseurs",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false
     }
   ],
   "users": [
     {
+      "username": "admin1",
+      "enabled": true,
+      "firstName": "Admin",
+      "lastName": "Projet",
+      "email": "admin1@ibam.local",
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "admin123", "temporary": false }],
+      "realmRoles": ["admin", "user"]
+    },
+    {
       "username": "user1",
       "enabled": true,
-      "credentials": [{ "type": "password", "value": "password123" }],
+      "firstName": "User",
+      "lastName": "Lecture",
+      "email": "user1@ibam.local",
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "password123", "temporary": false }],
       "realmRoles": ["user"]
+    },
+    {
+      "username": "sansrole1",
+      "enabled": true,
+      "firstName": "Sans",
+      "lastName": "Role",
+      "email": "sansrole1@ibam.local",
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "test123", "temporary": false }],
+      "realmRoles": []
     }
   ]
 }
